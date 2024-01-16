@@ -13,16 +13,18 @@ import easyquant.utils as utils
 def set_weight_quantize_params(model):
     for module in model.modules():
         if isinstance(module, QModule):
-            #module.weight_quantizer.set_inited(False)
             '''caculate the step size and zero point for weight quantizer'''
             module.weight_quantizer(module.weight)
-            #module.weight_quantizer.set_inited(True)
+            module.weight_quantizer.set_init_state(True)
               
 class QModule(nn.Module):
     def __init__(self, original_module, params):
         super().__init__()
+        self.original_module = original_module
         if original_module.bias is not None:
             self.bias = original_module.bias
+        else:
+            self.bias = None
         # Check for Conv1d, Conv2d, Conv3d
         if isinstance(original_module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
             self.fwd_kwargs = dict(
@@ -41,8 +43,8 @@ class QModule(nn.Module):
         else:
             self.fwd_kwargs = dict()
             self.fwd_func = F.linear
-        self.weight_quantizer = quantizer.build_quantizer('uniform',params)
-        self.act_quantizer = quantizer.build_quantizer('uniform',params)
+        self.weight_quantizer = quantizer.UniformQuantizer(params)
+        #self.act_quantizer = quantizer.build_quantizer('uniform',params)
         self.weight = original_module.weight
 
     def forward(self, x):
@@ -50,6 +52,12 @@ class QModule(nn.Module):
         bias = self.bias
         out = self.fwd_func(x, weight, bias, **self.fwd_kwargs)
         return out
+    
+    def get_scale_zero_point(self):
+        if self.weight_quantizer.inited:
+            return self.weight_quantizer.scale, self.weight_quantizer.zero_point
+        else: 
+            return None, None
 
 
 class QModel(nn.Module):
@@ -71,7 +79,7 @@ class QModel(nn.Module):
         
     def init_quantization(self, module):
         for child_name, child_module in module.named_children():
-            if isinstance(child_module, (nn.Conv2d, nn.conv1d, nn.conv3d, nn.Linear)): 
+            if isinstance(child_module, (nn.Conv2d, nn.Conv1d, nn.Conv3d, nn.Linear)): 
                 quant_module = QModule(child_module, self.params)
                 setattr(module, child_name, quant_module)
             else:
