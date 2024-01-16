@@ -23,10 +23,21 @@ class QModule(nn.Module):
         super().__init__()
         if original_module.bias is not None:
             self.bias = original_module.bias
-        if isinstance(original_module, nn.Conv2d):
-            self.fwd_kwargs = dict(stride=original_module.stride, padding=original_module.padding,
-                                   dilation=original_module.dilation, groups=original_module.groups)
-            self.fwd_func = F.conv2d
+        # Check for Conv1d, Conv2d, Conv3d
+        if isinstance(original_module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+            self.fwd_kwargs = dict(
+                stride=original_module.stride,
+                padding=original_module.padding,
+                dilation=original_module.dilation,
+                groups=original_module.groups
+            )
+
+            if isinstance(original_module, nn.Conv1d):
+                self.fwd_func = F.conv1d
+            elif isinstance(original_module, nn.Conv2d):
+                self.fwd_func = F.conv2d
+            elif isinstance(original_module, nn.Conv3d):
+                self.fwd_func = F.conv3d
         else:
             self.fwd_kwargs = dict()
             self.fwd_func = F.linear
@@ -60,7 +71,7 @@ class QModel(nn.Module):
         
     def init_quantization(self, module):
         for child_name, child_module in module.named_children():
-            if isinstance(child_module, (nn.Conv2d, nn.Linear)):
+            if isinstance(child_module, (nn.Conv2d, nn.conv1d, nn.conv3d, nn.Linear)): 
                 quant_module = QModule(child_module, self.params)
                 setattr(module, child_name, quant_module)
             else:
