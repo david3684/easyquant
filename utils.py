@@ -1,3 +1,5 @@
+import torch 
+
 def lp_loss(pred, tgt, p=2.0, reduction='none'):
     """
     loss function measured in L_p Norm
@@ -7,3 +9,8 @@ def lp_loss(pred, tgt, p=2.0, reduction='none'):
     else:
         return (pred-tgt).abs().pow(p).mean()
     
+def round_ste(x: torch.Tensor):
+    """
+    Implement Straight-Through Estimator for rounding operation.
+    """
+    return (x.round() - x).detach() + x
