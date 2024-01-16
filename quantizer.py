@@ -8,12 +8,17 @@ class UniformQuantizer(nn.Module):
         self.params = params
         self.num_levels = 2 ** self.params['w_n_bits']
         self.scale_method = self.params['w_optmod']
+        self.inited = False
+        self.scale = None
+        self.zero_point = None
         
     def forward(self, x):
-        self.scale, self.zero_point = self.init_quantization_scale(x, self.scale_method)
+        if self.inited == False:
+            self.scale, self.zero_point = self.init_quantization_scale(x, self.scale_method)
         x_int = utils.round_ste(x / self.scale) + self.zero_point
         x_quant = torch.clamp(x_int, 0, self.num_levels - 1)
-        print('float:{}, quantized weight:{}'.format(x, x_quant))
+        x_quant_int = x_quant.to(torch.int8)
+        #print('float:{}, quantized weight:{}'.format(x, x_quant))
         # x_dequant = (x_quant - self.zero_point) * self.scale
         return x_quant
     
@@ -46,7 +51,6 @@ class UniformQuantizer(nn.Module):
                 new_max = x_max * (1.0 - (i * 0.01))
                 new_min = x_min * (1.0 - (i * 0.01))
                 x_q = self.quantize(x, new_max, new_min)
-                # Cosine similarity 계산
                 similarity = torch.nn.functional.cosine_similarity(x.view(-1), x_q.view(-1), dim=0)
                 if similarity > best_similarity:
                     best_similarity = similarity
@@ -54,6 +58,10 @@ class UniformQuantizer(nn.Module):
                     zero_point = (- new_min / delta).round()
         return scale, zero_point
     
+    # set inited true if scales and zero points are initialized
+    def set_init_state(self, init = False):
+        self.inited = init
+        
     def quantize(self, x, max, min):
         scale = (max - min) / (2 ** self.n_bits - 1)
         zero_point = (- min / scale).round()
@@ -70,15 +78,4 @@ class AdaroundQuantizer(nn.Module):
         # Adaround quantization logic
         # ...
         return
-class build_quantizer(nn.Module):
-    def __init__(self, type, params):
-        super().__init__()
-        self.type = type
-        if self.type == "uniform":
-            self.quantizer = UniformQuantizer(params)
-        elif self.type == "adaround":
-            self.quantizer = AdaroundQuantizer(params)
-    def forward(self, x):
-        return self.quantizer(x)
-        
     
