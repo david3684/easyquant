@@ -19,8 +19,8 @@ class UniformQuantizer(nn.Module):
         x_quant = torch.clamp(x_int, 0, self.num_levels - 1)
         x_quant_int = x_quant.to(torch.int8)
         #print('float:{}, quantized weight:{}'.format(x, x_quant))
-        # x_dequant = (x_quant - self.zero_point) * self.scale
-        return x_quant
+        x_dequant = (x_quant - self.zero_point) * self.scale
+        return x_dequant
     
     # find initial quantization scale and zero point
     def init_quantization_scale(self, x: torch.Tensor, scale_method):
@@ -69,13 +69,4 @@ class UniformQuantizer(nn.Module):
         x_quant = torch.clamp(x_int + zero_point, 0, self.n_levels - 1)
         x_float_q = (x_quant - zero_point) * scale
         return x_float_q
-
-class AdaroundQuantizer(nn.Module):
-    def __init__(self, params):
-        super().__init__()
-        self.params = params
-    def forward(self, weights):
-        # Adaround quantization logic
-        # ...
-        return
     

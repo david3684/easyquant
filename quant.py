@@ -46,11 +46,15 @@ class QModule(nn.Module):
         self.weight_quantizer = quantizer.UniformQuantizer(params)
         #self.act_quantizer = quantizer.build_quantizer('uniform',params)
         self.weight = original_module.weight
+        self.norm_function = utils.StraightThrough()
+        self.activation_function = utils.StraightThrough()
 
     def forward(self, x):
         weight = self.weight_quantizer(self.weight)
         bias = self.bias
         out = self.fwd_func(x, weight, bias, **self.fwd_kwargs)
+        out = self.norm_function(out)
+        out = self.activation_function(out)
         return out
     
     def get_scale_zero_point(self):
