@@ -10,14 +10,19 @@ import warnings
 import easyquant.quantizer as quantizer
 import easyquant.utils as utils
 
-def set_weight_quantize_params(model):
-    for module in model.modules():
-        if isinstance(module, QModule):
-            '''caculate the step size and zero point for weight quantizer'''
-            module.weight_quantizer(module.weight)
-            module.weight_quantizer.set_init_state(True)
-              
+def set_weight_quantize_params(module):
+    """
+    Check if given module is qmodule, and caculate the step size and zero point for weight quantizer and set init state true
+    """
+    if isinstance(module, QModule):
+        
+        module.weight_quantizer(module.weight)
+        module.weight_quantizer.set_init_state(True)
+            
 class QModule(nn.Module):
+    """
+    Main module that performs quantization for convolution and linear layers
+    """
     def __init__(self, original_module, params):
         super().__init__()
         self.original_module = original_module
@@ -44,12 +49,15 @@ class QModule(nn.Module):
             self.fwd_kwargs = dict()
             self.fwd_func = F.linear
         self.weight_quantizer = quantizer.UniformQuantizer(params)
-        #self.act_quantizer = quantizer.build_quantizer('uniform',params)
         self.weight = original_module.weight
         self.norm_function = utils.StraightThrough()
         self.activation_function = utils.StraightThrough()
 
     def forward(self, x):
+        """
+        In first forward pass of the module, quantizer applies quantization to weights of module with initialized parameters.
+        Input is forwarded with quantized weight and original bias.
+        """
         weight = self.weight_quantizer(self.weight)
         bias = self.bias
         out = self.fwd_func(x, weight, bias, **self.fwd_kwargs)
@@ -67,28 +75,31 @@ class QModule(nn.Module):
 class QModel(nn.Module):
     """
     Make a given model into quantized model
-    
+    :param w_n_bits: number of bit for weight quantization
+    :param init_method: method for initializing scale and zero point for weight quantization
+    :param w_optmod: loss for reconstructing weight quantization paramters
     """
-    def __init__(self, model, w_n_bits=8, a_n_bits=8, quantizer = 'uniform', w_optmod='minmax', a_optmod='minmax'):
+    def __init__(self, model, w_n_bits=8, init_method = 'minmax', w_optmod = 'mse'):
         super().__init__()
         self.model = model 
         self.params = {
             'w_n_bits': w_n_bits,
-            'a_n_bits': a_n_bits,
-            'quantizer': quantizer,
-            'w_optmod' : w_optmod,
-            'a_optmod' : a_optmod
+            'init_method': init_method,
+            'w_optmod': w_optmod
         }
         self.init_quantization(self.model)
         
     def init_quantization(self, module):
+        """
+        Initialize quantization. Change convolution and linear modules into qmodule, and set weight quantization parameters for them.
+        """
         for child_name, child_module in module.named_children():
             if isinstance(child_module, (nn.Conv2d, nn.Conv1d, nn.Conv3d, nn.Linear)): 
                 quant_module = QModule(child_module, self.params)
                 setattr(module, child_name, quant_module)
+                set_weight_quantize_params(child_module)                                                      
             else:
                 self.init_quantization(child_module)
-        set_weight_quantize_params(module)                                                      
     def forward(self, input):
         return self.model(input)
 
