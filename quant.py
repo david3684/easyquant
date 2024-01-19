@@ -7,25 +7,25 @@ from torch.utils.data import DataLoader
 import os
 from tqdm import tqdm
 import warnings
-import easyquant.quantizer as quantizer
-import easyquant.utils as utils
+import quantizer as quantizer
+import utils as utils
 
-def set_weight_quantize_params(module):
+def set_weight_quantize_params(module, method):
     """
-    Check if given module is qmodule, and caculate the step size and zero point for weight quantizer and set init state true
+    Check if given module is qmodule, and apply initial quantization and save it, set init state true
     """
     if isinstance(module, QModule):
-        
-        module.weight_quantizer(module.weight)
+        print("Initializing {} with {}".format(module.module_path,method))
+        module.quantized_weight = module.weight_quantizer(module.origin_weight) 
         module.weight_quantizer.set_init_state(True)
-            
 class QModule(nn.Module):
     """
     Main module that performs quantization for convolution and linear layers
     """
-    def __init__(self, original_module, params):
+    def __init__(self, original_module, module_path, params):
         super().__init__()
         self.original_module = original_module
+        self.module_path = module_path
         if original_module.bias is not None:
             self.bias = original_module.bias
         else:
@@ -49,16 +49,18 @@ class QModule(nn.Module):
             self.fwd_kwargs = dict()
             self.fwd_func = F.linear
         self.weight_quantizer = quantizer.UniformQuantizer(params)
-        self.weight = original_module.weight
+        self.origin_weight = original_module.weight
+        self.quantized_weight = None
         self.norm_function = utils.StraightThrough()
         self.activation_function = utils.StraightThrough()
 
     def forward(self, x):
         """
-        In first forward pass of the module, quantizer applies quantization to weights of module with initialized parameters.
-        Input is forwarded with quantized weight and original bias.
+        
         """
-        weight = self.weight_quantizer(self.weight)
+        scale, zero_point = self.get_scale_zero_point()
+        weight = (self.quantized_weight - zero_point) * scale
+        #print(weight)
         bias = self.bias
         out = self.fwd_func(x, weight, bias, **self.fwd_kwargs)
         out = self.norm_function(out)
@@ -88,18 +90,19 @@ class QModel(nn.Module):
             'w_optmod': w_optmod
         }
         self.init_quantization(self.model)
-        
-    def init_quantization(self, module):
+        print("Complete initializing QModel")
+    def init_quantization(self, module, parent_name=''):
         """
         Initialize quantization. Change convolution and linear modules into qmodule, and set weight quantization parameters for them.
         """
         for child_name, child_module in module.named_children():
+            module_path = parent_name + '.' + child_name if parent_name else child_name
             if isinstance(child_module, (nn.Conv2d, nn.Conv1d, nn.Conv3d, nn.Linear)): 
-                quant_module = QModule(child_module, self.params)
+                quant_module = QModule(child_module, module_path, self.params)
                 setattr(module, child_name, quant_module)
-                set_weight_quantize_params(child_module)                                                      
+                set_weight_quantize_params(quant_module, self.params['init_method'])
             else:
-                self.init_quantization(child_module)
+                self.init_quantization(child_module, module_path)
     def forward(self, input):
         return self.model(input)
 

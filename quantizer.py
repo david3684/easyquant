@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
-import easyquant.utils as utils
+import utils as utils
 
 class UniformQuantizer(nn.Module):
     def __init__(self, params):
         super().__init__()
         self.params = params
         self.num_levels = 2 ** self.params['w_n_bits']
+        self.n_bits = self.params['w_n_bits']
         self.scale_method = self.params['w_optmod']
         self.inited = False
         self.scale = None
@@ -16,20 +17,21 @@ class UniformQuantizer(nn.Module):
         if self.inited == False:
             self.scale, self.zero_point = self.init_quantization_scale(x, self.scale_method)
         x_int = utils.round_ste(x / self.scale) + self.zero_point
-        x_quant = torch.clamp(x_int, 0, self.num_levels - 1)
-        x_quant_int = x_quant.to(torch.int8)
-        #print('float:{}, quantized weight:{}'.format(x, x_quant))
-        x_dequant = (x_quant - self.zero_point) * self.scale
-        return x_dequant
+        x_quant = torch.clamp(x_int, 0, self.num_levels - 1) #FP32
+        #print(x, x_quant)
+        #x_quant_int = x_quant.to(torch.int8)
+        return x_quant
     
     # find initial quantization scale and zero point
     def init_quantization_scale(self, x: torch.Tensor, scale_method):
         if scale_method == 'minmax':
+            print("Initializing scale with MinMax..")
             x_min = min(x.min().item(), 0)
             x_max = max(x.max().item(), 0)
             x_absmax = max(abs(x_min), x_max)
             scale = float(2*(x_absmax)) / (self.num_levels - 1)
             zero_point = round(-x_min/scale)
+            print("Done")
         elif scale_method == 'mse':
             x_max = x.max()
             x_min = x.min()
@@ -66,7 +68,7 @@ class UniformQuantizer(nn.Module):
         scale = (max - min) / (2 ** self.n_bits - 1)
         zero_point = (- min / scale).round()
         x_int = torch.round(x / scale)
-        x_quant = torch.clamp(x_int + zero_point, 0, self.n_levels - 1)
+        x_quant = torch.clamp(x_int + zero_point, 0, self.num_levels - 1)
         x_float_q = (x_quant - zero_point) * scale
         return x_float_q
     

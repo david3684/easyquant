@@ -7,7 +7,7 @@ import os
 from tqdm import tqdm
 import warnings
 import argparse
-import quant, quantizer
+import quant, quantizer, calibration
 
 
 
@@ -62,20 +62,23 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Easy Quantization Package')
 
     # weight quantization bitwidth
-    parser.add_argument('--w_n_bits', type=str, default='8',
-                        choices=['uniform', 'adaround', 'custom'],
-                        help='Method used for rounding during quantization.')
-
-    # 재구성 방법
-    parser.add_argument('--a_n_bits', type=str, default='8',
-                        choices=['layer_wise', 'block_wise', 'custom'],
-                        help='Reconstruction method to be used after quantization.')
+    parser.add_argument('--w_n_bits', type=int, default='8',
+                        help='weight quantization bitwidth')
+    # activation quantization bitwidth
+    parser.add_argument('--a_n_bits', type=int, default='8',
+                        help='activation quantization bitwidth')
     
-    
-    parser.add_argument('--init_method', type=int, default='min',
-                        choices=['min', 'mse'],
-                        help='Number of samples to use for calibration.')
-
+    #weight quantization parameter init method
+    parser.add_argument('--init_method', type=str, default='minmax',
+                        choices=['minmax', 'mse'],
+                        help='Weight quantization parameter init method')
+    # dataset path
+    parser.add_argument('--data_path', type=str, default='../datasets/imagenet2012/val',
+                        help='Validation dataset path')
+    args = parser.parse_args()
+    # calibration dataset path
+    parser.add_argument('--cali_path', type=str, default=None,
+                        help='Calibration dataset path. If none, sample from validation set')
     # calibration set size
     parser.add_argument('--cali_size', type=int, default=1024,
                         help='Number of samples to use for calibration.')
@@ -85,24 +88,20 @@ if __name__ == '__main__':
                         help='Apply adaptive rounding in reconstruction')
     
     # weight optimiztion method
-    parser.add_argument('--w_optmod', type=int, default='mse',
+    parser.add_argument('--w_optmod', type=str, default='mse',
+                        choices=['minmax', 'mse'],
                         help='Method used for optimizing quantized weights.')
     
     # activation optimiztion method
     parser.add_argument('--a_optmod', type=str, default='mse',
-                        choices=['min_max', 'mse'],
+                        choices=['minmax', 'mse'],
                         help='Method used for optimizing quantized activations.')
 
     args = parser.parse_args()
     
-    q_params = {'w_n_bits': args.w_n_bits, 'channel_wise': args.channel_wise, 'scale_method': args.init_wmode}
-    
-    model = torch.hub.load('yhhhli/BRECQ', model='resnet18', pretrained=True)
-
-    num_classes=200
-
-    qmodel = quant.QModel(model)
-
+    if args.cali_path is None:
+        args.cali_path = args.data_path
+        
     transforms = transforms.Compose([
         transforms.Resize(256),
         transforms.CenterCrop(224),
@@ -110,8 +109,12 @@ if __name__ == '__main__':
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
-    val_data = datasets.ImageFolder(root='./datasets/imagenet2012/val', transform=transforms)
+    model = torch.hub.load('yhhhli/BRECQ', model='resnet18', pretrained=True)    
+    qmodel = quant.QModel(model, args.w_n_bits, args.init_method, args.w_optmod)
+    
+    val_data = datasets.ImageFolder(root='../datasets/imagenet2012/val', transform=transforms)
     val_loader = DataLoader(val_data, batch_size=128, shuffle=True)
+    cali_loader = calibration.sample_calibration_set(dataset_path=args.cali_path, calibration_size=args.cali_size, transform=transforms)
 
     
     if torch.cuda.is_available():
