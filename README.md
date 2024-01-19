@@ -1,3 +1,3 @@
 ## EasyQuant
 #### WIP
-Easy quantization module for any models
+REAL quantization module for classical models
