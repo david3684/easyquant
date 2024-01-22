@@ -1,4 +1,4 @@
-## EasyQuant
+## RealQuant
 #### WIP
 REAL quantization module for classical models
 
