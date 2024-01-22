@@ -16,7 +16,7 @@ def set_weight_quantize_params(module, method):
     """
     if isinstance(module, QModule):
         print("Initializing {} with {}".format(module.module_path,method))
-        module.quantized_weight = module.weight_quantizer(module.origin_weight) 
+        module.quantized_weight = module.weight_quantizer.quantize(module.origin_weight) 
         module.weight_quantizer.set_init_state(True)
 class QModule(nn.Module):
     """
@@ -53,14 +53,19 @@ class QModule(nn.Module):
         self.quantized_weight = None
         self.norm_function = utils.StraightThrough()
         self.activation_function = utils.StraightThrough()
+        self.reconstructing = False
+        self.calibrated = False
+        self.cached_weight = None #cached weight used for final output
 
     def forward(self, x):
         """
         
         """
+        
+        if self.reconstructing:
+            self.quantized_weight = self.weight_quantizer.quantize(self.origin_weight) # requantize weight with AdaRound quantizer
         scale, zero_point = self.get_scale_zero_point()
         weight = (self.quantized_weight - zero_point) * scale
-        #print(weight)
         bias = self.bias
         out = self.fwd_func(x, weight, bias, **self.fwd_kwargs)
         out = self.norm_function(out)

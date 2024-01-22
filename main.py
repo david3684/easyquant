@@ -8,6 +8,7 @@ from tqdm import tqdm
 import warnings
 import argparse
 import quant, quantizer, calibration
+from recon import reconstruct
 
 
 
@@ -109,17 +110,19 @@ if __name__ == '__main__':
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
-    model = torch.hub.load('yhhhli/BRECQ', model='resnet18', pretrained=True)    
+    model = torch.hub.load('yhhhli/BRECQ', model='resnet18', pretrained=True)
+    model.cuda()
+    model.eval()
     qmodel = quant.QModel(model, args.w_n_bits, args.init_method, args.w_optmod)
+    print('Moving model to cuda')
+    qmodel.cuda()
+    qmodel.eval()
     
     val_data = datasets.ImageFolder(root='../datasets/imagenet2012/val', transform=transforms)
     val_loader = DataLoader(val_data, batch_size=128, shuffle=True)
     cali_loader = calibration.sample_calibration_set(dataset_path=args.cali_path, calibration_size=args.cali_size, transform=transforms)
 
     
-    if torch.cuda.is_available():
-        qmodel.cuda()
-
     learning_rate = 0.001
     optimizer = torch.optim.Adam(qmodel.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
@@ -128,6 +131,7 @@ if __name__ == '__main__':
     max_epoch = 50
     
 
-    vloss, vacc = process_epoch(qmodel, criterion, val_loader, optimizer, trainmode = False)
-    print('Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
+    #vloss, vacc = process_epoch(qmodel, criterion, val_loader, optimizer, trainmode = False)
+    #print('Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
     
+    reconstruct(qmodel, model, cali_loader)
