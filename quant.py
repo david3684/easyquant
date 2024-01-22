@@ -91,6 +91,7 @@ class QModel(nn.Module):
         }
         self.init_quantization(self.model)
         print("Complete initializing QModel")
+        
     def init_quantization(self, module, parent_name=''):
         """
         Initialize quantization. Change convolution and linear modules into qmodule, and set weight quantization parameters for them.
