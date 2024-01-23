@@ -6,7 +6,7 @@ class UniformQuantizer(nn.Module):
     def __init__(self, params):
         super().__init__()
         self.params = params
-        self.num_levels = 2 ** self.params['w_n_bits']
+        self.n_levels = 2 ** self.params['w_n_bits']
         self.n_bits = self.params['w_n_bits']
         self.scale_method = self.params['w_optmod']
         self.inited = False
@@ -17,7 +17,7 @@ class UniformQuantizer(nn.Module):
         if self.inited == False:
             self.scale, self.zero_point = self.init_quantization_scale(x, self.scale_method)
         x_int = utils.round_ste(x / self.scale) + self.zero_point
-        x_quant = torch.clamp(x_int, 0, self.num_levels - 1) #FP32
+        x_quant = torch.clamp(x_int, 0, self.n_levels - 1) #FP32
         #print(x, x_quant)
         #x_quant_int = x_quant.to(torch.int8)
         return x_quant
@@ -29,7 +29,7 @@ class UniformQuantizer(nn.Module):
             x_min = min(x.min().item(), 0)
             x_max = max(x.max().item(), 0)
             x_absmax = max(abs(x_min), x_max)
-            scale = float(2*(x_absmax)) / (self.num_levels - 1)
+            scale = float(2*(x_absmax)) / (self.n_levels - 1)
             zero_point = round(-x_min/scale)
             print("Done")
         elif scale_method == 'mse':
@@ -68,7 +68,7 @@ class UniformQuantizer(nn.Module):
         scale = (max - min) / (2 ** self.n_bits - 1)
         zero_point = (- min / scale).round()
         x_int = torch.round(x / scale)
-        x_quant = torch.clamp(x_int + zero_point, 0, self.num_levels - 1)
+        x_quant = torch.clamp(x_int + zero_point, 0, self.n_levels - 1)
         x_float_q = (x_quant - zero_point) * scale
         return x_float_q
     
@@ -77,7 +77,7 @@ class AdaRoundLearnableQuantizer(nn.Module):
     def __init__(self, base_quantizer, weight):
         super().__init__()
         self.n_bits = base_quantizer.n_bits
-        self.n_levels = base_quantizer.num_levels
+        self.n_levels = base_quantizer.n_levels
         self.scale = base_quantizer.scale
         self.zero_point = base_quantizer.zero_point
         self.alpha = None # learnable alpha for adaptive rounding
@@ -89,12 +89,17 @@ class AdaRoundLearnableQuantizer(nn.Module):
         self.inited = base_quantizer.inited
         
     def quantize(self, x):
+        #print(self.scale, self.zero_point)
         x_floor = torch.floor(x / self.scale)
         if self.soft_targets:
             x_int = x_floor + self.get_soft_targets()
         else:
             x_int = x_floor + (self.alpha >= 0).float()
         x_quant = torch.clamp(x_int + self.zero_point, 0, self.n_levels - 1)
+        x_dequant = (x_quant-self.zero_point)*self.scale
+        #print(x.shape)
+        #
+        # print(x[0, 0, 0, 0].item(),x_int[0, 0, 0, 0].item(),x_quant[0, 0, 0, 0].item(), x_dequant[0,0,0,0].item())
         return x_quant
     
     def get_soft_targets(self):
@@ -105,4 +110,5 @@ class AdaRoundLearnableQuantizer(nn.Module):
         print('Init alpha to be FP32')
         rest = (x / self.scale) - x_floor  # rest of rounding [0, 1)
         alpha = -torch.log((self.zeta - self.gamma) / (rest - self.gamma) - 1)  # => sigmoid(alpha) = rest
+        #print(alpha)
         self.alpha = nn.Parameter(alpha)

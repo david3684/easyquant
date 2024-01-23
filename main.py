@@ -113,7 +113,8 @@ if __name__ == '__main__':
     model = torch.hub.load('yhhhli/BRECQ', model='resnet18', pretrained=True)
     model.cuda()
     model.eval()
-    qmodel = quant.QModel(model, args.w_n_bits, args.init_method, args.w_optmod)
+    model_copy = copy.deepcopy(model)
+    qmodel = quant.QModel(model_copy, args.w_n_bits, args.init_method, args.w_optmod)
     print('Moving model to cuda')
     qmodel.cuda()
     qmodel.eval()
@@ -132,6 +133,10 @@ if __name__ == '__main__':
     
 
     #vloss, vacc = process_epoch(qmodel, criterion, val_loader, optimizer, trainmode = False)
-    #print('Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
+    #print('Accuracy Before Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
     
     reconstruct(qmodel, model, cali_loader)
+    
+    vloss, vacc = process_epoch(qmodel, criterion, val_loader, optimizer, trainmode = False)
+    print('Accuracy After Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
+    
