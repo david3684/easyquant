@@ -5,7 +5,7 @@ from tqdm import tqdm
 from quant import QModule, QModel
 from quantizer import AdaRoundLearnableQuantizer, UniformQuantizer
 
-def reconstruct(qmodel, fpmodel, calibration_set, reconstruction_method='layer', loss_type='mse', iters=1000):
+def reconstruct(qmodel, fpmodel, calibration_set, reconstruction_method='layer', loss_type='mse', iters=4000):
     """
     Reconstruct the quantized model using the calibration set.
     """
@@ -111,7 +111,9 @@ def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, cali_set, loss_type, 
     
     cached_q_inputs = get_input(qmodel, layer, cali_set, keep_gpu=False)
     cached_fp_outputs = get_output(fpmodel, fp_layer, cali_set, keep_gpu=False)
-    loss_func = Loss(layer, p=2, loss_type=loss_type)
+    loss_func = Loss(layer, round_loss='relaxation', weight=0.001,
+                             max_count=iters, rec_loss='mse', b_range=(20,2),
+                             decay_start=0, warmup=0.0, p=2)
     layer.weight_quantizer = AdaRoundLearnableQuantizer(base_quantizer=layer.weight_quantizer, weight = layer.quantized_weight)
     layer.weight_quantizer.soft_targets = True
     w_opttarget = [layer.weight_quantizer.alpha]
@@ -139,20 +141,108 @@ def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, cali_set, loss_type, 
     layer.reconstructing = False
     layer.weight_quantizer.soft_targets = False
 
+#class Loss:
+#    def __init__(self, layer, p, loss_type):
+#        self.layer = layer
+#        self.p = p
+#        self.loss_type = loss_type
+#        self.count = 0
+        
+        
+        
+#    def __call__(self, pred, target):
+#        self.count += 1
+        
+#        rec_loss = utils.lp_loss(pred, target, p=self.p)
+        
+#        round_loss = 0
+#        round_vals = self.layer.weight_quantizer.get_soft_targets()
+#        round_loss += self.weight * (1 - ((round_vals - .5).abs() * 2).pow(b)).sum()
+#        pd_loss = 0
+#        total_loss = rec_loss + round_loss + pd_loss
+        
+#        return total_loss
+
+class LinearTempDecay:
+    def __init__(self, t_max: int, rel_start_decay: float = 0.2, start_b: int = 10, end_b: int = 2):
+        self.t_max = t_max
+        self.start_decay = rel_start_decay * t_max
+        self.start_b = start_b
+        self.end_b = end_b
+
+    def __call__(self, t):
+        """
+        Cosine annealing scheduler for temperature b.
+        :param t: the current time step
+        :return: scheduled temperature
+        """
+        if t < self.start_decay:
+            return self.start_b
+        else:
+            rel_t = (t - self.start_decay) / (self.t_max - self.start_decay)
+            return self.end_b + (self.start_b - self.end_b) * max(0.0, (1 - rel_t))
+        
 class Loss:
-    def __init__(self, layer, p, loss_type):
+    def __init__(self,
+                 layer: QModule,
+                 round_loss: str = 'relaxation',
+                 weight: float = 1.,
+                 rec_loss: str = 'mse',
+                 max_count: int = 2000,
+                 b_range: tuple = (10, 2),
+                 decay_start: float = 0.0,
+                 warmup: float = 0.0,
+                 p: float = 2.):
+
         self.layer = layer
+        self.round_loss = round_loss
+        self.weight = weight
+        self.rec_loss = rec_loss
+        self.loss_start = max_count * warmup
         self.p = p
-        self.loss_type = loss_type
+
+        self.temp_decay = LinearTempDecay(max_count, rel_start_decay=warmup + (1 - warmup) * decay_start,
+                                          start_b=b_range[0], end_b=b_range[1])
         self.count = 0
-        
-    def __call__(self, pred, target):
+
+    def __call__(self, pred, tgt, grad=None):
+        """
+        Compute the total loss for adaptive rounding:
+        rec_loss is the quadratic output reconstruction loss, round_loss is
+        a regularization term to optimize the rounding policy
+
+        :param pred: output from quantized model
+        :param tgt: output from FP model
+        :param grad: gradients to compute fisher information
+        :return: total loss function
+        """
         self.count += 1
-        
-        rec_loss = utils.lp_loss(pred, target, p=self.p)
-        
-        round_loss = 0
-        pd_loss = 0
-        total_loss = rec_loss + round_loss + pd_loss
-        
+        if self.rec_loss == 'mse':
+            rec_loss = utils.lp_loss(pred, tgt, p=self.p)
+        elif self.rec_loss == 'fisher_diag':
+            rec_loss = ((pred - tgt).pow(2) * grad.pow(2)).sum(1).mean()
+        elif self.rec_loss == 'fisher_full':
+            a = (pred - tgt).abs()
+            grad = grad.abs()
+            batch_dotprod = torch.sum(a * grad, (1, 2, 3)).view(-1, 1, 1, 1)
+            rec_loss = (batch_dotprod * a * grad).mean() / 100
+        else:
+            raise ValueError('Not supported reconstruction loss function: {}'.format(self.rec_loss))
+
+        b = self.temp_decay(self.count)
+        #print(self.layer.weight_quantizer.alpha)
+        if self.count < self.loss_start or self.round_loss == 'none':
+            b = round_loss = 0
+        elif self.round_loss == 'relaxation':
+            round_loss = 0
+            round_vals = self.layer.weight_quantizer.get_soft_targets()
+            #print(round_vals)
+            round_loss += self.weight * (1 - ((round_vals - .5).abs() * 2).pow(b)).sum()
+        else:
+            raise NotImplementedError
+
+        total_loss = rec_loss + round_loss
+        if self.count % 10 == 0:
+            print('Total loss:\t{:.3f} (rec:{:.3f}, round:{:.3f})\tb={:.2f}\tcount={}'.format(
+                  float(total_loss), float(rec_loss), float(round_loss), b, self.count))
         return total_loss

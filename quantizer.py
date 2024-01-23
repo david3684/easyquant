@@ -103,6 +103,7 @@ class AdaRoundLearnableQuantizer(nn.Module):
         return x_quant
     
     def get_soft_targets(self):
+        print(torch.sigmoid(self.alpha))
         return torch.clamp(torch.sigmoid(self.alpha) * (self.zeta - self.gamma) + self.gamma, 0, 1)
     
     def init_alpha(self, x: torch.Tensor):
@@ -110,5 +111,5 @@ class AdaRoundLearnableQuantizer(nn.Module):
         print('Init alpha to be FP32')
         rest = (x / self.scale) - x_floor  # rest of rounding [0, 1)
         alpha = -torch.log((self.zeta - self.gamma) / (rest - self.gamma) - 1)  # => sigmoid(alpha) = rest
-        #print(alpha)
+        #print('Initial Apha :{}'.format(alpha))
         self.alpha = nn.Parameter(alpha)
