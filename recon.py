@@ -9,6 +9,17 @@ def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, reconstructio
     """
     Reconstruct the quantized model using the calibration set.
     """
+    fpmodel.eval()
+    cached_outputs = {}
+    hooks = []
+
+    def save_output(module, inp, out):
+        if module not in cached_outputs:
+            cached_outputs[module] = []
+        cached_outputs[module].append(out.detach().cpu())
+        
+        
+    
     fp_modules = dict(fpmodel.named_modules())
 
     for name, qmodule in qmodel.named_modules():
@@ -19,15 +30,31 @@ def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, reconstructio
             fp_module_name = name.replace('model.', '')
             if fp_module_name in fp_modules:
                 fp_module = fp_modules[fp_module_name]
-                #print(qmodule, fp_module)
-                print(f"Reconstructing layer: {name}")
+                hook = fp_module.register_forward_hook(save_output)
+                hooks.append(hook)
+                
+    with torch.no_grad():
+        for data, _ in calibration_set:
+            data = data.to('cuda')
+            fpmodel(data)
 
-                if reconstruction_method == 'layer':
-                    layer_reconstruction(qmodel, fpmodel, qmodule, fp_module, calibration_set, loss_type, iters, adaround)
-                else:
-                    raise NotImplementedError(f"Reconstruction method '{reconstruction_method}' not implemented")
-            else:
-                print(f"FP module for {name} not found")
+    # Remove hooks
+    for hook in hooks:
+        hook.remove()
+        
+    for name, qmodule in qmodel.named_modules():
+        if isinstance(qmodule, QModule) and 'downsample' not in name:
+            fp_module_name = name.replace('model.', '')
+            if fp_module_name in fp_modules:
+                fp_module = fp_modules[fp_module_name]
+                if fp_module in cached_outputs:
+                    fp_module_output = torch.cat(cached_outputs[fp_module], dim=0)
+                    print(f"Reconstructing layer: {name}")
+                    if reconstruction_method == 'layer':
+                        layer_reconstruction(qmodel, fpmodel, qmodule, fp_module, fp_module_output, calibration_set, loss_type, iters, adaround)
+                    else:
+                        raise NotImplementedError(f"Reconstruction method '{reconstruction_method}' not implemented")
+
     print("Reconstruction completed.")
     
 def get_input(model, layer, loader, batch_size=32, keep_gpu=True):
@@ -109,10 +136,10 @@ def get_output(model, layer, loader, batch_size=32, keep_gpu=True):
     return cached_outs
 
 
-def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, cali_set, loss_type, iters, adaround = True):
+def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, fp_module_output, cali_set, loss_type, iters, adaround = True):
     print('Start Caching')
     cached_q_inputs = get_input(qmodel, layer, cali_set, keep_gpu=False)
-    cached_fp_outputs = get_output(fpmodel, fp_layer, cali_set, keep_gpu=False)
+    print('Done Caching')
     if adaround:
         loss_func = Loss(layer, round_loss='relaxation', weight=0.001,
                                 max_count=iters, rec_loss='mse', b_range=(20,2),
@@ -136,14 +163,14 @@ def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, cali_set, loss_type, 
     for i in t:
         indices = torch.randint(0, len(cached_q_inputs), (batch_size,))
         optimizer.zero_grad()
-        target_output = torch.index_select(cached_fp_outputs, 0, indices).to('cuda')
+        target_output = torch.index_select(fp_module_output, 0, indices).to('cuda')
         quant_inputs = torch.index_select(cached_q_inputs, 0, indices).to('cuda')
         quant_output = layer(quant_inputs)
         loss = loss_func(quant_output, target_output)
         loss.backward(retain_graph=True)
         optimizer.step()
         t.set_postfix(loss=loss.item())
-
+    print('Done Iteration')
     layer.reconstructing = False
     layer.weight_quantizer.soft_targets = False
 
