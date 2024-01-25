@@ -83,8 +83,8 @@ class AdaRoundLearnableQuantizer(nn.Module):
         self.alpha = None # learnable alpha for adaptive rounding
         self.gamma, self.zeta = -0.1, 1.1
         self.beta = 2/3
-        self.init_dequant = (weight-self.zero_point)*self.scale
-        self.init_alpha(x=self.init_dequant)
+        # self.init_dequant = (weight-self.zero_point)*self.scale
+        self.init_alpha(x=weight.clone())
         self.soft_targets = False
         self.inited = base_quantizer.inited
         
@@ -103,7 +103,7 @@ class AdaRoundLearnableQuantizer(nn.Module):
         return x_quant
     
     def get_soft_targets(self):
-        print(torch.sigmoid(self.alpha))
+        #print(torch.sigmoid(self.alpha))
         return torch.clamp(torch.sigmoid(self.alpha) * (self.zeta - self.gamma) + self.gamma, 0, 1)
     
     def init_alpha(self, x: torch.Tensor):

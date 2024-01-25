@@ -132,11 +132,11 @@ if __name__ == '__main__':
     max_epoch = 50
     
 
-    #vloss, vacc = process_epoch(qmodel, criterion, val_loader, optimizer, trainmode = False)
-    #print('Accuracy Before Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
+    vloss, vacc = process_epoch(qmodel, criterion, cali_loader, optimizer, trainmode = False)
+    print('Accuracy Before Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
     
     reconstruct(qmodel, model, cali_loader)
     
-    vloss, vacc = process_epoch(qmodel, criterion, val_loader, optimizer, trainmode = False)
+    vloss, vacc = process_epoch(qmodel, criterion, cali_loader, optimizer, trainmode = False)
     print('Accuracy After Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
     

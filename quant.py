@@ -49,7 +49,7 @@ class QModule(nn.Module):
             self.fwd_kwargs = dict()
             self.fwd_func = F.linear
         self.weight_quantizer = quantizer.UniformQuantizer(params)
-        self.origin_weight = original_module.weight
+        self.origin_weight = original_module.weight.data.clone()
         self.quantized_weight = None
         self.norm_function = utils.StraightThrough()
         self.activation_function = utils.StraightThrough()
@@ -61,7 +61,7 @@ class QModule(nn.Module):
         """
         
         """
-        
+        # print("Module : {}, {}".format(self.original_module.__class__.__name__, self.weight_quantizer))
         if self.reconstructing:
             self.quantized_weight = self.weight_quantizer.quantize(self.origin_weight) # requantize weight with AdaRound quantizer
         scale, zero_point = self.get_scale_zero_point()

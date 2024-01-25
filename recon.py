@@ -5,7 +5,7 @@ from tqdm import tqdm
 from quant import QModule, QModel
 from quantizer import AdaRoundLearnableQuantizer, UniformQuantizer
 
-def reconstruct(qmodel, fpmodel, calibration_set, reconstruction_method='layer', loss_type='mse', iters=4000):
+def reconstruct(qmodel, fpmodel, calibration_set, reconstruction_method='layer', loss_type='mse', iters=10000):
     """
     Reconstruct the quantized model using the calibration set.
     """
@@ -13,11 +13,13 @@ def reconstruct(qmodel, fpmodel, calibration_set, reconstruction_method='layer',
 
     for name, qmodule in qmodel.named_modules():
         if isinstance(qmodule, QModule):
-            
+            if 'downsample' in name:
+                print(f"Skipping downsampling layer: {name}")
+                continue
             fp_module_name = name.replace('model.', '')
-
             if fp_module_name in fp_modules:
                 fp_module = fp_modules[fp_module_name]
+                #print(qmodule, fp_module)
                 print(f"Reconstructing layer: {name}")
 
                 if reconstruction_method == 'layer':
@@ -108,31 +110,29 @@ def get_output(model, layer, loader, batch_size=32, keep_gpu=True):
 
 
 def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, cali_set, loss_type, iters):
-    
+    print('Start Caching')
     cached_q_inputs = get_input(qmodel, layer, cali_set, keep_gpu=False)
     cached_fp_outputs = get_output(fpmodel, fp_layer, cali_set, keep_gpu=False)
     loss_func = Loss(layer, round_loss='relaxation', weight=0.001,
                              max_count=iters, rec_loss='mse', b_range=(20,2),
                              decay_start=0, warmup=0.0, p=2)
-    layer.weight_quantizer = AdaRoundLearnableQuantizer(base_quantizer=layer.weight_quantizer, weight = layer.quantized_weight)
+    layer.weight_quantizer = AdaRoundLearnableQuantizer(base_quantizer=layer.weight_quantizer, weight= layer.origin_weight)
     layer.weight_quantizer.soft_targets = True
     w_opttarget = [layer.weight_quantizer.alpha]
-    lr = 3e-3
+    lr = 5e-3
     optimizer = torch.optim.Adam(w_opttarget, lr=lr)
     layer.reconstructing = True
     
     batch_size = 32
     
-    
-    t = tqdm(range(iters), desc='Reconstructing layer')
+    print('Start Iteration')
+    t = tqdm(range(iters))
     for i in t:
         indices = torch.randint(0, len(cached_q_inputs), (batch_size,))
-
         optimizer.zero_grad()
         target_output = torch.index_select(cached_fp_outputs, 0, indices).to('cuda')
         quant_inputs = torch.index_select(cached_q_inputs, 0, indices).to('cuda')
         quant_output = layer(quant_inputs)
-        
         loss = loss_func(quant_output, target_output)
         loss.backward(retain_graph=True)
         optimizer.step()
@@ -141,27 +141,22 @@ def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, cali_set, loss_type, 
     layer.reconstructing = False
     layer.weight_quantizer.soft_targets = False
 
-#class Loss:
-#    def __init__(self, layer, p, loss_type):
-#        self.layer = layer
-#        self.p = p
-#        self.loss_type = loss_type
-#        self.count = 0
-        
-        
-        
-#    def __call__(self, pred, target):
-#        self.count += 1
-        
-#        rec_loss = utils.lp_loss(pred, target, p=self.p)
-        
-#        round_loss = 0
-#        round_vals = self.layer.weight_quantizer.get_soft_targets()
-#        round_loss += self.weight * (1 - ((round_vals - .5).abs() * 2).pow(b)).sum()
-#        pd_loss = 0
-#        total_loss = rec_loss + round_loss + pd_loss
-        
-#        return total_loss
+def average_weight_change(pre_recon_weights, post_recon_weights):
+    """
+    Calculate the average change in weights before and after reconstruction.
+
+    :param pre_recon_weights: Tensor of weights before reconstruction.
+    :param post_recon_weights: Tensor of weights after reconstruction.
+    :return: Average change in weights.
+    """
+    # Ensure both tensors are on the same device and in the same format
+    pre_recon_weights = pre_recon_weights.to(post_recon_weights.device)
+    
+    # Calculate the absolute differences and then the average
+    weight_change = torch.abs(post_recon_weights - pre_recon_weights)
+    average_change = torch.mean(weight_change).item()
+
+    return average_change
 
 class LinearTempDecay:
     def __init__(self, t_max: int, rel_start_decay: float = 0.2, start_b: int = 10, end_b: int = 2):
@@ -242,7 +237,7 @@ class Loss:
             raise NotImplementedError
 
         total_loss = rec_loss + round_loss
-        if self.count % 10 == 0:
+        if self.count % 2000 == 0:
             print('Total loss:\t{:.3f} (rec:{:.3f}, round:{:.3f})\tb={:.2f}\tcount={}'.format(
                   float(total_loss), float(rec_loss), float(round_loss), b, self.count))
         return total_loss
