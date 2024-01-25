@@ -7,3 +7,9 @@ REAL quantization module for classical models
 1) Uniform Weight Quantization
 2) If Adaround, reconstruct weight quantizer
 3) If Activation Quantization, quantize activation with uniform quantizer
+
+
+---
+Todo
+- Reconstruction Loss : Cosine
+- Scale optimization based on uniform quantization
