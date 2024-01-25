@@ -5,7 +5,7 @@ from tqdm import tqdm
 from quant import QModule, QModel
 from quantizer import AdaRoundLearnableQuantizer, UniformQuantizer
 
-def reconstruct(qmodel, fpmodel, calibration_set, reconstruction_method='layer', loss_type='mse', iters=10000):
+def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, reconstruction_method='layer', loss_type='mse',  iters=3):
     """
     Reconstruct the quantized model using the calibration set.
     """
@@ -23,7 +23,7 @@ def reconstruct(qmodel, fpmodel, calibration_set, reconstruction_method='layer',
                 print(f"Reconstructing layer: {name}")
 
                 if reconstruction_method == 'layer':
-                    layer_reconstruction(qmodel, fpmodel, qmodule, fp_module, calibration_set, loss_type, iters)
+                    layer_reconstruction(qmodel, fpmodel, qmodule, fp_module, calibration_set, loss_type, iters, adaround)
                 else:
                     raise NotImplementedError(f"Reconstruction method '{reconstruction_method}' not implemented")
             else:
@@ -109,16 +109,22 @@ def get_output(model, layer, loader, batch_size=32, keep_gpu=True):
     return cached_outs
 
 
-def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, cali_set, loss_type, iters):
+def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, cali_set, loss_type, iters, adaround = True):
     print('Start Caching')
     cached_q_inputs = get_input(qmodel, layer, cali_set, keep_gpu=False)
     cached_fp_outputs = get_output(fpmodel, fp_layer, cali_set, keep_gpu=False)
-    loss_func = Loss(layer, round_loss='relaxation', weight=0.001,
-                             max_count=iters, rec_loss='mse', b_range=(20,2),
-                             decay_start=0, warmup=0.0, p=2)
-    layer.weight_quantizer = AdaRoundLearnableQuantizer(base_quantizer=layer.weight_quantizer, weight= layer.origin_weight)
-    layer.weight_quantizer.soft_targets = True
-    w_opttarget = [layer.weight_quantizer.alpha]
+    if adaround:
+        loss_func = Loss(layer, round_loss='relaxation', weight=0.001,
+                                max_count=iters, rec_loss='mse', b_range=(20,2),
+                                decay_start=0, warmup=0.0, p=2)
+        layer.weight_quantizer = AdaRoundLearnableQuantizer(base_quantizer=layer.weight_quantizer, weight= layer.origin_weight)
+        layer.weight_quantizer.soft_targets = True
+        w_opttarget = [layer.weight_quantizer.alpha]
+    else:
+        loss_func = Loss(layer, round_loss=None, weight=0.001,
+                                max_count=iters, rec_loss='mse', b_range=(20,2),
+                                decay_start=0, warmup=0.0, p=2)
+        w_opttarget = [layer.weight_quantizer.scale]
     lr = 5e-3
     optimizer = torch.optim.Adam(w_opttarget, lr=lr)
     layer.reconstructing = True
@@ -141,22 +147,6 @@ def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, cali_set, loss_type, 
     layer.reconstructing = False
     layer.weight_quantizer.soft_targets = False
 
-def average_weight_change(pre_recon_weights, post_recon_weights):
-    """
-    Calculate the average change in weights before and after reconstruction.
-
-    :param pre_recon_weights: Tensor of weights before reconstruction.
-    :param post_recon_weights: Tensor of weights after reconstruction.
-    :return: Average change in weights.
-    """
-    # Ensure both tensors are on the same device and in the same format
-    pre_recon_weights = pre_recon_weights.to(post_recon_weights.device)
-    
-    # Calculate the absolute differences and then the average
-    weight_change = torch.abs(post_recon_weights - pre_recon_weights)
-    average_change = torch.mean(weight_change).item()
-
-    return average_change
 
 class LinearTempDecay:
     def __init__(self, t_max: int, rel_start_decay: float = 0.2, start_b: int = 10, end_b: int = 2):
@@ -234,7 +224,7 @@ class Loss:
             #print(round_vals)
             round_loss += self.weight * (1 - ((round_vals - .5).abs() * 2).pow(b)).sum()
         else:
-            raise NotImplementedError
+            round_loss = 0
 
         total_loss = rec_loss + round_loss
         if self.count % 2000 == 0:

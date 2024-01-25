@@ -15,7 +15,7 @@ def set_weight_quantize_params(module, method):
     Check if given module is qmodule, and apply initial quantization and save it, set init state true
     """
     if isinstance(module, QModule):
-        print("Initializing {} with {}".format(module.module_path,method))
+        print("Initializing {} with {}".format(module.module_path, method))
         module.quantized_weight = module.weight_quantizer.quantize(module.origin_weight) 
         module.weight_quantizer.set_init_state(True)
 class QModule(nn.Module):
@@ -26,6 +26,7 @@ class QModule(nn.Module):
         super().__init__()
         self.original_module = original_module
         self.module_path = module_path
+        self.params = params
         if original_module.bias is not None:
             self.bias = original_module.bias
         else:
@@ -48,7 +49,9 @@ class QModule(nn.Module):
         else:
             self.fwd_kwargs = dict()
             self.fwd_func = F.linear
-        self.weight_quantizer = quantizer.UniformQuantizer(params)
+        self.weight_quantizer = quantizer.UniformQuantizer(params, True)
+        if self.params['use_act_quant']:
+            self.act_quantizer = quantizer.UniformQuantizer(params,False)
         self.origin_weight = original_module.weight.data.clone()
         self.quantized_weight = None
         self.norm_function = utils.StraightThrough()
@@ -70,6 +73,9 @@ class QModule(nn.Module):
         out = self.fwd_func(x, weight, bias, **self.fwd_kwargs)
         out = self.norm_function(out)
         out = self.activation_function(out)
+        if self.params['use_act_quant']:
+            out = self.act_quantizer.quantize(out)
+            out = (out - self.act_quantizer.zero_point) * self.act_quantizer.scale
         return out
     
     def get_scale_zero_point(self):
@@ -86,13 +92,15 @@ class QModel(nn.Module):
     :param init_method: method for initializing scale and zero point for weight quantization
     :param w_optmod: loss for reconstructing weight quantization paramters
     """
-    def __init__(self, model, w_n_bits=8, init_method = 'minmax', w_optmod = 'mse'):
+    def __init__(self, model, w_n_bits=8, a_n_bits=8, init_method = 'minmax', w_optmod = 'mse', use_act_quant = False):
         super().__init__()
         self.model = model 
         self.params = {
             'w_n_bits': w_n_bits,
+            'a_n_bits': a_n_bits,
             'init_method': init_method,
-            'w_optmod': w_optmod
+            'w_optmod': w_optmod,
+            'use_act_quant' : use_act_quant
         }
         self.init_quantization(self.model)
         print("Complete initializing QModel")

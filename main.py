@@ -76,7 +76,7 @@ if __name__ == '__main__':
     # dataset path
     parser.add_argument('--data_path', type=str, default='../datasets/imagenet2012/val',
                         help='Validation dataset path')
-    args = parser.parse_args()
+
     # calibration dataset path
     parser.add_argument('--cali_path', type=str, default=None,
                         help='Calibration dataset path. If none, sample from validation set')
@@ -85,8 +85,11 @@ if __name__ == '__main__':
                         help='Number of samples to use for calibration.')
     
     # quantizer 
-    parser.add_argument('--adaround', type=bool, default='true',
+    parser.add_argument('--adaround', action='store_true',
                         help='Apply adaptive rounding in reconstruction')
+    
+    parser.add_argument('--use_act_quant', action='store_true',
+                        help='Apply activation quantization')
     
     # weight optimiztion method
     parser.add_argument('--w_optmod', type=str, default='mse',
@@ -114,7 +117,8 @@ if __name__ == '__main__':
     model.cuda()
     model.eval()
     model_copy = copy.deepcopy(model)
-    qmodel = quant.QModel(model_copy, args.w_n_bits, args.init_method, args.w_optmod)
+    
+    qmodel = quant.QModel(model_copy, w_n_bits=args.w_n_bits, a_n_bits=args.a_n_bits, init_method=args.init_method, w_optmod=args.w_optmod, use_act_quant=args.use_act_quant)
     print('Moving model to cuda')
     qmodel.cuda()
     qmodel.eval()
@@ -125,18 +129,17 @@ if __name__ == '__main__':
 
     
     learning_rate = 0.001
-    optimizer = torch.optim.Adam(qmodel.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
-
+    
     criterion = nn.CrossEntropyLoss()
     max_epoch = 50
     
 
-    vloss, vacc = process_epoch(qmodel, criterion, cali_loader, optimizer, trainmode = False)
+    vloss, vacc = process_epoch(qmodel, criterion, cali_loader, trainmode = False)
     print('Accuracy Before Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
     
-    reconstruct(qmodel, model, cali_loader)
+
+    reconstruct(qmodel, model, cali_loader, adaround=args.adaround)
     
-    vloss, vacc = process_epoch(qmodel, criterion, cali_loader, optimizer, trainmode = False)
+    vloss, vacc = process_epoch(qmodel, criterion, cali_loader, trainmode = False)
     print('Accuracy After Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
     
