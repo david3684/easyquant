@@ -6,11 +6,19 @@ from torch.utils.data import DataLoader
 import os
 from tqdm import tqdm
 import warnings
-import argparse
+import argparse, json
 import quant, quantizer, calibration
 from recon import reconstruct
 
 
+def save_results_to_file(filename, args, results):
+    with open(filename, 'a') as file:  # 'a' 모드로 파일 열기
+        file.write("\n\n--- New Execution ---\n")
+        file.write("Terminal Parameters:\n")
+        file.write(json.dumps(vars(args), indent=4))
+        file.write("\n\nEvaluation Results:\n")
+        for result in results:
+            file.write(f"{result['stage']}: Val loss {result['loss']:.3f}, Val accuracy {result['accuracy']:.1f}%\n")
 
 
 def save_checkpoint(state, filename="checkpoint.pth.tar"):
@@ -112,10 +120,19 @@ if __name__ == '__main__':
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
+    criterion = nn.CrossEntropyLoss()
+    learning_rate = 0.001
+    val_data = datasets.ImageFolder(root='../datasets/imagenet2012/val', transform=transforms)
+    val_loader = DataLoader(val_data, batch_size=128, shuffle=True)
+    cali_loader = calibration.sample_calibration_set(dataset_path=args.cali_path, calibration_size=args.cali_size, transform=transforms)
     
+    results = []
     model = torch.hub.load('yhhhli/BRECQ', model='resnet18', pretrained=True)
     model.cuda()
     model.eval()
+    vloss, vacc = process_epoch(model, criterion, cali_loader, trainmode = False)
+    print('Baseline : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
+    
     model_copy = copy.deepcopy(model)
     
     qmodel = quant.QModel(model_copy, w_n_bits=args.w_n_bits, a_n_bits=args.a_n_bits, init_method=args.init_method, w_optmod=args.w_optmod, use_act_quant=args.use_act_quant)
@@ -123,23 +140,17 @@ if __name__ == '__main__':
     qmodel.cuda()
     qmodel.eval()
     
-    val_data = datasets.ImageFolder(root='../datasets/imagenet2012/val', transform=transforms)
-    val_loader = DataLoader(val_data, batch_size=128, shuffle=True)
-    cali_loader = calibration.sample_calibration_set(dataset_path=args.cali_path, calibration_size=args.cali_size, transform=transforms)
-
-    
-    learning_rate = 0.001
-    
-    criterion = nn.CrossEntropyLoss()
-    max_epoch = 50
-    
-
-    # vloss, vacc = process_epoch(qmodel, criterion, cali_loader, trainmode = False)
-    # print('Accuracy Before Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
+    vloss, vacc = process_epoch(qmodel, criterion, cali_loader, trainmode = False)
+    print('Accuracy Before Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
+    results.append({'stage': 'Before Reconstruction', 'loss': vloss, 'accuracy': vacc*100})
     
 
     reconstruct(qmodel, model, cali_loader, adaround=args.adaround)
     
     vloss, vacc = process_epoch(qmodel, criterion, cali_loader, trainmode = False)
     print('Accuracy After Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
+    results.append({'stage': 'After Reconstruction', 'loss': vloss, 'accuracy': vacc*100})
+
     
+    results.append({'stage': 'Baseline', 'loss': vloss, 'accuracy': vacc*100})
+    save_results_to_file("evaluation_results.txt", args, results)

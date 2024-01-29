@@ -5,7 +5,7 @@ from tqdm import tqdm
 from quant import QModule, QModel
 from quantizer import AdaRoundLearnableQuantizer, UniformQuantizer
 
-def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, reconstruction_method='layer', loss_type='mse',  iters=3):
+def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, reconstruction_method='layer', loss_type='mse',  iters=2000):
     """
     Reconstruct the quantized model using the calibration set.
     """
@@ -73,17 +73,18 @@ def get_input(model, layer, loader, batch_size=32, keep_gpu=True):
     model.eval()
 
     # Hook for extracting the inputs to the layer
-    def hook_fn(module, inp, out):
-        cached_inputs.append(inp[0].detach().cpu())
+    def hook_fn(module, inp):
+        if keep_gpu:
+            cached_inputs.append(inp[0].detach())  # GPU에 저장
+        else:
+            cached_inputs.append(inp[0].detach().cpu())  # CPU에 저장
 
-    hook = layer.register_forward_hook(hook_fn)
+    hook = layer.register_forward_pre_hook(hook_fn)
 
     with torch.no_grad():
         for data, _ in loader:
             data = data.to(device)
             model(data)
-            torch.cuda.empty_cache()
-
             if len(cached_inputs) * batch_size >= loader.dataset.__len__():
                 break
 
@@ -92,53 +93,15 @@ def get_input(model, layer, loader, batch_size=32, keep_gpu=True):
     cached_inps = torch.cat(cached_inputs, dim=0)
 
     if not keep_gpu:
-        cached_inps = cached_inps.cpu()
-
-    torch.cuda.empty_cache()
+        cached_inps = cached_inps.cpu()  # 중복되는 부분이므로 이 부분은 생략할 수도 있습니다.
 
     return cached_inps  
 
-def get_output(model, layer, loader, batch_size=32, keep_gpu=True):
-    """
-    Get output data for a particular layer over calibration dataset using DataLoader.
-
-    :param model: Model for which outputs are to be cached.
-    :param layer: Layer for which outputs are to be cached.
-    :param loader: DataLoader for the calibration dataset.
-    :param batch_size: Batch size for processing.
-    :param keep_gpu: Keep data on GPU if True, else move to CPU.
-    :return: Cached output data for the specified layer.
-    """
-    device = next(model.parameters()).device
-    cached_outputs = []
-    model.eval()
-
-    # Hook for extracting the outputs from the layer
-    hook = layer.register_forward_hook(lambda mod, inp, out: cached_outputs.append(out.detach().cpu()))
-
-    with torch.no_grad():
-        for data, _ in loader:
-            data = data.to(device)
-            model(data)
-            torch.cuda.empty_cache()
-
-            if len(cached_outputs) * batch_size >= loader.dataset.__len__():
-                break
-
-    hook.remove()
-
-    cached_outs = torch.cat(cached_outputs, dim=0)
-    if not keep_gpu:
-        cached_outs = cached_outs.cpu()
-
-    torch.cuda.empty_cache()
-
-    return cached_outs
-
 
 def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, fp_module_output, cali_set, loss_type, iters, adaround = True):
+    device = torch.device('cuda')
     print('Start Caching')
-    cached_q_inputs = get_input(qmodel, layer, cali_set, keep_gpu=False)
+    cached_q_inputs = get_input(qmodel, layer, cali_set, keep_gpu=True).to(device)
     print('Done Caching')
     if adaround:
         loss_func = Loss(layer, round_loss='relaxation', weight=0.001,
@@ -161,10 +124,10 @@ def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, fp_module_output, cal
     print('Start Iteration')
     t = tqdm(range(iters))
     for i in t:
-        indices = torch.randint(0, len(cached_q_inputs), (batch_size,))
+        indices = torch.randint(0, len(cached_q_inputs), (batch_size,)).to(device)
         optimizer.zero_grad()
-        target_output = torch.index_select(fp_module_output, 0, indices).to('cuda')
-        quant_inputs = torch.index_select(cached_q_inputs, 0, indices).to('cuda')
+        target_output = torch.index_select(fp_module_output.to(device), 0, indices).to(device)
+        quant_inputs = torch.index_select(cached_q_inputs, 0, indices).to(device)
         quant_output = layer(quant_inputs)
         loss = loss_func(quant_output, target_output)
         loss.backward(retain_graph=True)
