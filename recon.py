@@ -5,10 +5,11 @@ from tqdm import tqdm
 from quant import QModule, QModel
 from quantizer import AdaRoundLearnableQuantizer, UniformQuantizer
 
-def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, reconstruction_method='layer', loss_type='mse',  iters=2000):
+def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, recon_act = False, reconstruction_method='layer', loss_type='mse',  iters=20000):
     """
     Reconstruct the quantized model using the calibration set.
     """
+
     fpmodel.eval()
     cached_outputs = {}
     hooks = []
@@ -17,8 +18,6 @@ def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, reconstructio
         if module not in cached_outputs:
             cached_outputs[module] = []
         cached_outputs[module].append(out.detach().cpu())
-        
-        
     
     fp_modules = dict(fpmodel.named_modules())
 
@@ -34,7 +33,7 @@ def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, reconstructio
                 hooks.append(hook)
                 
     with torch.no_grad():
-        for data, _ in calibration_set:
+        for data, _ in tqdm(calibration_set):
             data = data.to('cuda')
             fpmodel(data)
 
@@ -51,11 +50,12 @@ def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, reconstructio
                     fp_module_output = torch.cat(cached_outputs[fp_module], dim=0)
                     print(f"Reconstructing layer: {name}")
                     if reconstruction_method == 'layer':
-                        layer_reconstruction(qmodel, fpmodel, qmodule, fp_module, fp_module_output, calibration_set, loss_type, iters, adaround)
+                        layer_reconstruction(qmodel, qmodule, fp_module_output, calibration_set, iters, adaround, loss_type, recon_act)
                     else:
                         raise NotImplementedError(f"Reconstruction method '{reconstruction_method}' not implemented")
 
     print("Reconstruction completed.")
+    
     
 def get_input(model, layer, loader, batch_size=32, keep_gpu=True):
     """
@@ -93,35 +93,49 @@ def get_input(model, layer, loader, batch_size=32, keep_gpu=True):
     cached_inps = torch.cat(cached_inputs, dim=0)
 
     if not keep_gpu:
-        cached_inps = cached_inps.cpu()  # 중복되는 부분이므로 이 부분은 생략할 수도 있습니다.
+        cached_inps = cached_inps.cpu() 
 
     return cached_inps  
 
 
-def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, fp_module_output, cali_set, loss_type, iters, adaround = True):
+def layer_reconstruction(qmodel, layer, fp_module_output, cali_set, iters, adaround = True, loss_type='mse', recon_act = False):
     device = torch.device('cuda')
     print('Start Caching')
     cached_q_inputs = get_input(qmodel, layer, cali_set, keep_gpu=True).to(device)
     print('Done Caching')
+    opttarget = []
+    lr = 5e-3
     if adaround:
         loss_func = Loss(layer, round_loss='relaxation', weight=0.001,
-                                max_count=iters, rec_loss='mse', b_range=(20,2),
+                                max_count=iters, rec_loss=loss_type, b_range=(20,2),
                                 decay_start=0, warmup=0.0, p=2)
         layer.weight_quantizer = AdaRoundLearnableQuantizer(base_quantizer=layer.weight_quantizer, weight= layer.origin_weight)
         layer.weight_quantizer.soft_targets = True
-        w_opttarget = [layer.weight_quantizer.alpha]
-    else:
-        loss_func = Loss(layer, round_loss=None, weight=0.001,
-                                max_count=iters, rec_loss='mse', b_range=(20,2),
+        opttarget = [layer.weight_quantizer.alpha]
+        optimizer = torch.optim.Adam(opttarget, lr=lr)
+        scheduler = None
+        layer.reconstructing = True
+    elif recon_act:
+        loss_func = Loss(layer, round_loss='none', weight=0.001,
+                                max_count=iters, rec_loss=loss_type, b_range=(20,2),
                                 decay_start=0, warmup=0.0, p=2)
-        w_opttarget = [layer.weight_quantizer.scale]
-    lr = 5e-3
-    optimizer = torch.optim.Adam(w_opttarget, lr=lr)
-    layer.reconstructing = True
+        opttarget += [layer.act_quantizer.scale]
+        optimizer = torch.optim.Adam(opttarget, lr=lr)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=iters, eta_min=0.)
+        layer.reconstructing = False
+    else:
+        loss_func = Loss(layer, round_loss='none', weight=0.001,
+                                max_count=iters, rec_loss=loss_type, b_range=(20,2),
+                                decay_start=0, warmup=0.0, p=2)
+        opttarget = [layer.weight_quantizer.scale]
+        optimizer = torch.optim.Adam(opttarget, lr=lr)
+        scheduler = None
+        layer.reconstructing = True
     
     batch_size = 32
     
     print('Start Iteration')
+    
     t = tqdm(range(iters))
     for i in t:
         indices = torch.randint(0, len(cached_q_inputs), (batch_size,)).to(device)
@@ -133,6 +147,9 @@ def layer_reconstruction(qmodel, fpmodel, layer, fp_layer, fp_module_output, cal
         loss.backward(retain_graph=True)
         optimizer.step()
         t.set_postfix(loss=loss.item())
+        if scheduler:
+            scheduler.step()
+            
     print('Done Iteration')
     layer.reconstructing = False
     layer.weight_quantizer.soft_targets = False
@@ -205,19 +222,18 @@ class Loss:
             raise ValueError('Not supported reconstruction loss function: {}'.format(self.rec_loss))
 
         b = self.temp_decay(self.count)
-        #print(self.layer.weight_quantizer.alpha)
+
         if self.count < self.loss_start or self.round_loss == 'none':
             b = round_loss = 0
         elif self.round_loss == 'relaxation':
             round_loss = 0
             round_vals = self.layer.weight_quantizer.get_soft_targets()
-            #print(round_vals)
             round_loss += self.weight * (1 - ((round_vals - .5).abs() * 2).pow(b)).sum()
         else:
             round_loss = 0
 
         total_loss = rec_loss + round_loss
-        if self.count % 2000 == 0:
+        if self.count % 1000 == 0:
             print('Total loss:\t{:.3f} (rec:{:.3f}, round:{:.3f})\tb={:.2f}\tcount={}'.format(
                   float(total_loss), float(rec_loss), float(round_loss), b, self.count))
         return total_loss

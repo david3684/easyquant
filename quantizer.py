@@ -20,24 +20,24 @@ class UniformQuantizer(nn.Module):
     def quantize(self, x):
         if self.inited == False:
             scale, self.zero_point = self.init_quantization_scale(x, self.scale_method)
-            self. scale = nn.Parameter(scale)
+            scale_tensor = torch.tensor(scale, dtype=torch.float32)
+            self.scale = nn.Parameter(scale_tensor)
+            self.inited == True
         x_int = utils.round_ste(x / self.scale) + self.zero_point
         x_quant = torch.clamp(x_int, 0, self.n_levels - 1) #FP32
         #print(x, x_quant)
-        #x_quant_int = x_quant.to(torch.int8)
+        x_quant_int = x_quant.to(torch.int8)
         return x_quant
     
     # find initial quantization scale and zero point
     def init_quantization_scale(self, x: torch.Tensor, scale_method):
         scale, zero_point = None, None
         if scale_method == 'minmax':
-            print("Initializing scale with MinMax..")
             x_min = min(x.min().item(), 0)
             x_max = max(x.max().item(), 0)
             x_absmax = max(abs(x_min), x_max)
             scale = float(2*(x_absmax)) / (self.n_levels - 1)
             zero_point = round(-x_min/scale)
-            print("Done")
         elif scale_method == 'mse':
             x_max = x.max()
             x_min = x.min()
@@ -104,7 +104,7 @@ class AdaRoundLearnableQuantizer(nn.Module):
         else:
             x_int = x_floor + (self.alpha >= 0).float()
         x_quant = torch.clamp(x_int + self.zero_point, 0, self.n_levels - 1)
-        x_dequant = (x_quant-self.zero_point)*self.scale
+        x_quant_int = x_quant.to(torch.int8)
         return x_quant
     
     def get_soft_targets(self):

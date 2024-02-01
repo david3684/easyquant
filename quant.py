@@ -50,7 +50,7 @@ class QModule(nn.Module):
             self.fwd_kwargs = dict()
             self.fwd_func = F.linear
         self.weight_quantizer = quantizer.UniformQuantizer(params, True)
-        if self.params['use_act_quant']:
+        if self.params['a_n_bits'] is not None:
             self.act_quantizer = quantizer.UniformQuantizer(params,False)
         self.origin_weight = original_module.weight.data.clone()
         self.quantized_weight = None
@@ -64,7 +64,6 @@ class QModule(nn.Module):
         """
         
         """
-        # print("Module : {}, {}".format(self.original_module.__class__.__name__, self.weight_quantizer))
         if self.reconstructing:
             self.quantized_weight = self.weight_quantizer.quantize(self.origin_weight) # requantize weight with AdaRound quantizer
         scale, zero_point = self.get_scale_zero_point()
@@ -73,7 +72,7 @@ class QModule(nn.Module):
         out = self.fwd_func(x, weight, bias, **self.fwd_kwargs)
         out = self.norm_function(out)
         out = self.activation_function(out)
-        if self.params['use_act_quant']:
+        if self.params['a_n_bits'] is not None:
             out = self.act_quantizer.quantize(out)
             out = (out - self.act_quantizer.zero_point) * self.act_quantizer.scale
         return out
@@ -92,15 +91,13 @@ class QModel(nn.Module):
     :param init_method: method for initializing scale and zero point for weight quantization
     :param w_optmod: loss for reconstructing weight quantization paramters
     """
-    def __init__(self, model, w_n_bits=8, a_n_bits=8, init_method = 'minmax', w_optmod = 'mse', use_act_quant = False):
+    def __init__(self, model, w_n_bits=8, a_n_bits=None, init_method = 'minmax'):
         super().__init__()
         self.model = model 
         self.params = {
             'w_n_bits': w_n_bits,
             'a_n_bits': a_n_bits,
             'init_method': init_method,
-            'w_optmod': w_optmod,
-            'use_act_quant' : use_act_quant
         }
         self.init_quantization(self.model)
         print("Complete initializing QModel")

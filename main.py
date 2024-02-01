@@ -12,7 +12,7 @@ from recon import reconstruct
 
 
 def save_results_to_file(filename, args, results):
-    with open(filename, 'a') as file:  # 'a' 모드로 파일 열기
+    with open(filename, 'a') as file:  
         file.write("\n\n--- New Execution ---\n")
         file.write("Terminal Parameters:\n")
         file.write(json.dumps(vars(args), indent=4))
@@ -20,15 +20,6 @@ def save_results_to_file(filename, args, results):
         for result in results:
             file.write(f"{result['stage']}: Val loss {result['loss']:.3f}, Val accuracy {result['accuracy']:.1f}%\n")
 
-
-def save_checkpoint(state, filename="checkpoint.pth.tar"):
-    torch.save(state, filename)
-
-
-def load_checkpoint(checkpoint, model, optimizer):
-    model.load_state_dict(checkpoint['state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    return checkpoint['epoch']
 
 def process_epoch(model, criterion, loader, optimizer=None, trainmode=True):
     if trainmode:
@@ -61,7 +52,6 @@ def process_epoch(model, criterion, loader, optimizer=None, trainmode=True):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()  # 누적 정확도
 
-            # 각 배치 처리 후 tqdm 진행 바 업데이트
             tepoch.set_postfix(loss=(closs / total), acc_pct=(correct / total * 100))
 
     return (closs / total), (correct / total)
@@ -74,7 +64,7 @@ if __name__ == '__main__':
     parser.add_argument('--w_n_bits', type=int, default='8',
                         help='weight quantization bitwidth')
     # activation quantization bitwidth
-    parser.add_argument('--a_n_bits', type=int, default='8',
+    parser.add_argument('--a_n_bits', type=int, default='None',
                         help='activation quantization bitwidth')
     
     #weight quantization parameter init method
@@ -95,19 +85,6 @@ if __name__ == '__main__':
     # quantizer 
     parser.add_argument('--adaround', action='store_true',
                         help='Apply adaptive rounding in reconstruction')
-    
-    parser.add_argument('--use_act_quant', action='store_true',
-                        help='Apply activation quantization')
-    
-    # weight optimiztion method
-    parser.add_argument('--w_optmod', type=str, default='mse',
-                        choices=['minmax', 'mse'],
-                        help='Method used for optimizing quantized weights.')
-    
-    # activation optimiztion method
-    parser.add_argument('--a_optmod', type=str, default='mse',
-                        choices=['minmax', 'mse'],
-                        help='Method used for optimizing quantized activations.')
 
     args = parser.parse_args()
     
@@ -135,8 +112,7 @@ if __name__ == '__main__':
     
     model_copy = copy.deepcopy(model)
     
-    qmodel = quant.QModel(model_copy, w_n_bits=args.w_n_bits, a_n_bits=args.a_n_bits, init_method=args.init_method, w_optmod=args.w_optmod, use_act_quant=args.use_act_quant)
-    print('Moving model to cuda')
+    qmodel = quant.QModel(model_copy, w_n_bits=args.w_n_bits, a_n_bits=args.a_n_bits, init_method=args.init_method)
     qmodel.cuda()
     qmodel.eval()
     
@@ -146,6 +122,8 @@ if __name__ == '__main__':
     
 
     reconstruct(qmodel, model, cali_loader, adaround=args.adaround)
+    if args.a_n_bits is not None:
+        reconstruct(qmodel, model, cali_loader, adaround=False, recon_act=True)
     
     vloss, vacc = process_epoch(qmodel, criterion, cali_loader, trainmode = False)
     print('Accuracy After Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
@@ -154,3 +132,6 @@ if __name__ == '__main__':
     
     results.append({'stage': 'Baseline', 'loss': vloss, 'accuracy': vacc*100})
     save_results_to_file("evaluation_results.txt", args, results)
+    
+    vloss, vacc = process_epoch(qmodel, criterion, val_loader, trainmode = False)
+    print('Accuracy After Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))

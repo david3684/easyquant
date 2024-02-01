@@ -122,3 +122,108 @@ Evaluation Results:
 Baseline: Val loss 1.275, Val accuracy 71.0%
 Before Reconstruction: Val loss 4.070, Val accuracy 26.9%
 After Reconstruction: Val loss 1.378, Val accuracy 68.9%
+
+
+--- New Execution ---
+Terminal Parameters:
+{
+    "w_n_bits": 8,
+    "a_n_bits": 8,
+    "init_method": "minmax",
+    "data_path": "../datasets/imagenet2012/val",
+    "cali_path": "../datasets/imagenet2012/val",
+    "cali_size": 1024,
+    "adaround": false,
+    "use_act_quant": false,
+    "w_optmod": "mse",
+    "a_optmod": "mse"
+}
+
+Evaluation Results:
+Before Reconstruction: Val loss 1.304, Val accuracy 71.0%
+After Reconstruction: Val loss 6.908, Val accuracy 0.0%
+Baseline: Val loss 6.908, Val accuracy 0.0%
+
+
+--- New Execution ---
+Terminal Parameters:
+{
+    "w_n_bits": 4,
+    "a_n_bits": 4,
+    "init_method": "minmax",
+    "data_path": "../datasets/imagenet2012/val",
+    "cali_path": "../datasets/imagenet2012/val",
+    "cali_size": 1024,
+    "adaround": true,
+    "use_act_quant": true,
+    "w_optmod": "mse",
+    "a_optmod": "mse"
+}
+
+Evaluation Results:
+Before Reconstruction: Val loss 7.000, Val accuracy 0.2%
+After Reconstruction: Val loss 6.381, Val accuracy 4.1%
+Baseline: Val loss 6.381, Val accuracy 4.1%
+
+
+--- New Execution ---
+Terminal Parameters:
+{
+    "w_n_bits": 4,
+    "a_n_bits": 4,
+    "init_method": "minmax",
+    "data_path": "../datasets/imagenet2012/val",
+    "cali_path": "../datasets/imagenet2012/val",
+    "cali_size": 1024,
+    "adaround": true,
+    "use_act_quant": true,
+    "w_optmod": "mse",
+    "a_optmod": "mse"
+}
+
+Evaluation Results:
+Before Reconstruction: Val loss 6.983, Val accuracy 0.0%
+After Reconstruction: Val loss 5.871, Val accuracy 12.1%
+Baseline: Val loss 5.871, Val accuracy 12.1%
+
+
+--- New Execution ---
+Terminal Parameters:
+{
+    "w_n_bits": 4,
+    "a_n_bits": 4,
+    "init_method": "minmax",
+    "data_path": "../datasets/imagenet2012/val",
+    "cali_path": "../datasets/imagenet2012/val",
+    "cali_size": 1024,
+    "adaround": true,
+    "use_act_quant": true,
+    "w_optmod": "mse",
+    "a_optmod": "mse"
+}
+
+Evaluation Results:
+Before Reconstruction: Val loss 6.963, Val accuracy 0.2%
+After Reconstruction: Val loss 5.852, Val accuracy 16.1%
+Baseline: Val loss 5.852, Val accuracy 16.1%
+
+
+--- New Execution ---
+Terminal Parameters:
+{
+    "w_n_bits": 8,
+    "a_n_bits": 8,
+    "init_method": "minmax",
+    "data_path": "../datasets/imagenet2012/val",
+    "cali_path": "../datasets/imagenet2012/val",
+    "cali_size": 1024,
+    "adaround": true,
+    "use_act_quant": false,
+    "w_optmod": "mse",
+    "a_optmod": "mse"
+}
+
+Evaluation Results:
+Before Reconstruction: Val loss 1.500, Val accuracy 66.1%
+After Reconstruction: Val loss 1.223, Val accuracy 72.0%
+Baseline: Val loss 1.223, Val accuracy 72.0%
