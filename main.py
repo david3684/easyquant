@@ -23,7 +23,7 @@ def save_results_to_file(filename, args, results):
             file.write(f"{result['stage']}: Val loss {result['loss']:.3f}, Val accuracy {result['accuracy']:.1f}%\n")
             
 def print_memory_usage(description, device='cuda'):
-    allocated = torch.cuda.memory_allocated(device) / (1024 ** 2)  # MB 단위로 변환
+    allocated = torch.cuda.memory_allocated(device) / (1024 ** 2)  
     print(f"{description}: {allocated:.2f} MB")
     
 def count_flop(model):
@@ -33,7 +33,6 @@ def count_flop(model):
     
 
 def infer_and_measure_memory_usage(model, loader, device='cuda'):
-    # 메모리 사용량 측정 시작
     torch.cuda.reset_peak_memory_stats(device)
     print_memory_usage("Before inference")
     
@@ -42,11 +41,10 @@ def infer_and_measure_memory_usage(model, loader, device='cuda'):
             images = images.to(device)
             labels = labels.to(device)
             outputs = model(images)
-            break  # 하나의 배치만 처리
+            break  
 
-    # 메모리 사용량 측정 종료
     print_memory_usage("After inference")
-    peak_memory = torch.cuda.max_memory_allocated(device) / (1024 ** 2)  # 최대 메모리 사용량
+    peak_memory = torch.cuda.max_memory_allocated(device) / (1024 ** 2)  
     print(f"Peak memory usage during inference: {peak_memory:.2f} MB")
 
 def process_epoch(model, criterion, loader, optimizer=None, trainmode=True):
@@ -76,9 +74,9 @@ def process_epoch(model, criterion, loader, optimizer=None, trainmode=True):
                     loss = criterion(outputs, labels)
 
             _, predicted = torch.max(outputs.data, 1)
-            closs += loss.item() * images.size(0)  # 누적 손실
+            closs += loss.item() * images.size(0)  
             total += labels.size(0)
-            correct += (predicted == labels).sum().item()  # 누적 정확도
+            correct += (predicted == labels).sum().item()  
 
             tepoch.set_postfix(loss=(closs / total), acc_pct=(correct / total * 100))
 
@@ -86,15 +84,15 @@ def process_epoch(model, criterion, loader, optimizer=None, trainmode=True):
 
 def export_quantized_model(qmodel):
     dummy_input = torch.randn(1, 3, 224, 224).cuda()
-    torch.onnx.export(qmodel,         # 양자화된 모델
-                    dummy_input,    # 모델에 대한 더미 입력
-                    "./quantized_model.onnx",  # 내보낼 파일의 이름
-                    export_params=True,      # 모델 파라미터 포함
-                    opset_version=11,        # 사용할 ONNX 버전 (모델에 따라 조정)
-                    do_constant_folding=True, # 최적화 여부
-                    input_names=['input'],   # 입력 노드의 이름
-                    output_names=['output'], # 출력 노드의 이름
-                    dynamic_axes={'input': {0: 'batch_size'}, # 배치 크기가 동적임을 나타냅니다.
+    torch.onnx.export(qmodel,         
+                    dummy_input,    
+                    "./quantized_model.onnx",  
+                    export_params=True,      
+                    opset_version=11,        
+                    do_constant_folding=True, 
+                    input_names=['input'],   
+                    output_names=['output'], 
+                    dynamic_axes={'input': {0: 'batch_size'}, 
                                     'output': {0: 'batch_size'}})
 
     print("Quantized model has been exported to quantized_model.onnx")
