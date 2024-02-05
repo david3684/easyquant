@@ -9,6 +9,8 @@ import warnings
 import argparse, json
 import quant, quantizer, calibration
 from recon import reconstruct
+import torch.onnx
+from fvcore.nn import FlopCountAnalysis
 
 
 def save_results_to_file(filename, args, results):
@@ -19,7 +21,33 @@ def save_results_to_file(filename, args, results):
         file.write("\n\nEvaluation Results:\n")
         for result in results:
             file.write(f"{result['stage']}: Val loss {result['loss']:.3f}, Val accuracy {result['accuracy']:.1f}%\n")
+            
+def print_memory_usage(description, device='cuda'):
+    allocated = torch.cuda.memory_allocated(device) / (1024 ** 2)  # MB 단위로 변환
+    print(f"{description}: {allocated:.2f} MB")
+    
+def count_flop(model):
+    dummy_input = torch.randn(1,3,224,224).cuda()
+    flops = FlopCountAnalysis(model, dummy_input)
+    print(f"Total FLOPs: {flops.total()}")
+    
 
+def infer_and_measure_memory_usage(model, loader, device='cuda'):
+    # 메모리 사용량 측정 시작
+    torch.cuda.reset_peak_memory_stats(device)
+    print_memory_usage("Before inference")
+    
+    with torch.no_grad():
+        for images, labels in loader:
+            images = images.to(device)
+            labels = labels.to(device)
+            outputs = model(images)
+            break  # 하나의 배치만 처리
+
+    # 메모리 사용량 측정 종료
+    print_memory_usage("After inference")
+    peak_memory = torch.cuda.max_memory_allocated(device) / (1024 ** 2)  # 최대 메모리 사용량
+    print(f"Peak memory usage during inference: {peak_memory:.2f} MB")
 
 def process_epoch(model, criterion, loader, optimizer=None, trainmode=True):
     if trainmode:
@@ -56,6 +84,20 @@ def process_epoch(model, criterion, loader, optimizer=None, trainmode=True):
 
     return (closs / total), (correct / total)
 
+def export_quantized_model(qmodel):
+    dummy_input = torch.randn(1, 3, 224, 224).cuda()
+    torch.onnx.export(qmodel,         # 양자화된 모델
+                    dummy_input,    # 모델에 대한 더미 입력
+                    "./quantized_model.onnx",  # 내보낼 파일의 이름
+                    export_params=True,      # 모델 파라미터 포함
+                    opset_version=11,        # 사용할 ONNX 버전 (모델에 따라 조정)
+                    do_constant_folding=True, # 최적화 여부
+                    input_names=['input'],   # 입력 노드의 이름
+                    output_names=['output'], # 출력 노드의 이름
+                    dynamic_axes={'input': {0: 'batch_size'}, # 배치 크기가 동적임을 나타냅니다.
+                                    'output': {0: 'batch_size'}})
+
+    print("Quantized model has been exported to quantized_model.onnx")
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Easy Quantization Package')
@@ -116,14 +158,17 @@ if __name__ == '__main__':
     qmodel.cuda()
     qmodel.eval()
     
-    vloss, vacc = process_epoch(qmodel, criterion, cali_loader, trainmode = False)
-    print('Accuracy Before Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
-    results.append({'stage': 'Before Reconstruction', 'loss': vloss, 'accuracy': vacc*100})
+    # count_flop(model)
+    # count_flop(qmodel)
+    # vloss, vacc = process_epoch(qmodel, criterion, cali_loader, trainmode = False)
+    # print('Accuracy Before Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
+    # results.append({'stage': 'Before Reconstruction', 'loss': vloss, 'accuracy': vacc*100})
     
 
-    reconstruct(qmodel, model, cali_loader, adaround=args.adaround)
-    if args.a_n_bits is not None:
-        reconstruct(qmodel, model, cali_loader, adaround=False, recon_act=True)
+    # reconstruct(qmodel, model, cali_loader, adaround=args.adaround)
+    # if args.a_n_bits is not None:
+    #     reconstruct(qmodel, model, cali_loader, adaround=False, recon_act=True)
+    export_quantized_model(qmodel)
     
     vloss, vacc = process_epoch(qmodel, criterion, cali_loader, trainmode = False)
     print('Accuracy After Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))

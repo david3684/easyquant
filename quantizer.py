@@ -22,15 +22,15 @@ class UniformQuantizer(nn.Module):
             scale, self.zero_point = self.init_quantization_scale(x, self.scale_method)
             scale_tensor = torch.tensor(scale, dtype=torch.float32)
             self.scale = nn.Parameter(scale_tensor)
-            self.inited == True
+            self.inited = True
         x_int = utils.round_ste(x / self.scale) + self.zero_point
         x_quant = torch.clamp(x_int, 0, self.n_levels - 1) #FP32
-        #print(x, x_quant)
         x_quant_int = x_quant.to(torch.int8)
-        return x_quant
+        return x_quant_int
     
     # find initial quantization scale and zero point
     def init_quantization_scale(self, x: torch.Tensor, scale_method):
+        
         scale, zero_point = None, None
         if scale_method == 'minmax':
             x_min = min(x.min().item(), 0)

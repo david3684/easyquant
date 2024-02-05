@@ -99,6 +99,7 @@ def get_input(model, layer, loader, batch_size=32, keep_gpu=True):
 
 
 def layer_reconstruction(qmodel, layer, fp_module_output, cali_set, iters, adaround = True, loss_type='mse', recon_act = False):
+
     device = torch.device('cuda')
     print('Start Caching')
     cached_q_inputs = get_input(qmodel, layer, cali_set, keep_gpu=True).to(device)
