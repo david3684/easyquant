@@ -19,7 +19,6 @@ def sample_calibration_set(dataset_path, calibration_size, transform=None, batch
     indices = np.random.choice(len(dataset), size=calibration_size, replace=False)
     calibration_dataset = Subset(dataset, indices)
 
-    # DataLoader 생성
     calibration_loader = DataLoader(calibration_dataset, batch_size=batch_size, num_workers=4, shuffle=False)
     print("Done")
     return calibration_loader

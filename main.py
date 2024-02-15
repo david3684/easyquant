@@ -10,7 +10,7 @@ import argparse, json
 import quant, quantizer, calibration
 from recon import reconstruct
 import torch.onnx
-from fvcore.nn import FlopCountAnalysis
+# from fvcore.nn import FlopCountAnalysis
 
 
 def save_results_to_file(filename, args, results):
@@ -139,6 +139,8 @@ if __name__ == '__main__':
     ])
     criterion = nn.CrossEntropyLoss()
     learning_rate = 0.001
+    
+
     val_data = datasets.ImageFolder(root='../datasets/imagenet2012/val', transform=transforms)
     val_loader = DataLoader(val_data, batch_size=128, shuffle=True)
     cali_loader = calibration.sample_calibration_set(dataset_path=args.cali_path, calibration_size=args.cali_size, transform=transforms)
@@ -149,6 +151,7 @@ if __name__ == '__main__':
     model.eval()
     vloss, vacc = process_epoch(model, criterion, cali_loader, trainmode = False)
     print('Baseline : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
+    results.append({'stage': 'Baseline', 'loss': vloss, 'accuracy': vacc*100})
     
     model_copy = copy.deepcopy(model)
     
@@ -158,22 +161,20 @@ if __name__ == '__main__':
     
     # count_flop(model)
     # count_flop(qmodel)
-    # vloss, vacc = process_epoch(qmodel, criterion, cali_loader, trainmode = False)
-    # print('Accuracy Before Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
-    # results.append({'stage': 'Before Reconstruction', 'loss': vloss, 'accuracy': vacc*100})
+    vloss, vacc = process_epoch(qmodel, criterion, cali_loader, trainmode = False)
+    print('Accuracy Before Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
+    results.append({'stage': 'Before Reconstruction', 'loss': vloss, 'accuracy': vacc*100})
     
 
-    # reconstruct(qmodel, model, cali_loader, adaround=args.adaround)
-    # if args.a_n_bits is not None:
-    #     reconstruct(qmodel, model, cali_loader, adaround=False, recon_act=True)
-    export_quantized_model(qmodel)
+    reconstruct(qmodel, model, cali_loader, adaround=args.adaround)
+    if args.a_n_bits is not None:
+        reconstruct(qmodel, model, cali_loader, adaround=False, recon_act=True)
+    #export_quantized_model(qmodel)
     
     vloss, vacc = process_epoch(qmodel, criterion, cali_loader, trainmode = False)
     print('Accuracy After Reconstruction : Val loss {:.3f} Val accuracy {:.1f}%'.format(vloss,vacc*100))
     results.append({'stage': 'After Reconstruction', 'loss': vloss, 'accuracy': vacc*100})
-
     
-    results.append({'stage': 'Baseline', 'loss': vloss, 'accuracy': vacc*100})
     save_results_to_file("evaluation_results.txt", args, results)
     
     vloss, vacc = process_epoch(qmodel, criterion, val_loader, trainmode = False)

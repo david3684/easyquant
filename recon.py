@@ -5,7 +5,7 @@ from tqdm import tqdm
 from quant import QModule, QModel
 from quantizer import AdaRoundLearnableQuantizer, UniformQuantizer
 
-def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, recon_act = False, reconstruction_method='layer', loss_type='mse',  iters=20000):
+def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, recon_act = False, reconstruction_method='layer', loss_type='mse',  iters=5000):
     """
     Reconstruct the quantized model using the calibration set.
     """

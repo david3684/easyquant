@@ -26,7 +26,7 @@ class UniformQuantizer(nn.Module):
         x_int = utils.round_ste(x / self.scale) + self.zero_point
         x_quant = torch.clamp(x_int, 0, self.n_levels - 1) #FP32
         x_quant_int = x_quant.to(torch.int8)
-        return x_quant_int
+        return x_quant
     
     # find initial quantization scale and zero point
     def init_quantization_scale(self, x: torch.Tensor, scale_method):
