@@ -13,7 +13,8 @@ def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, recon_act = F
     fpmodel.eval()
     cached_outputs = {}
     hooks = []
-
+    torch.cuda.set_device(1)
+    device = torch.device("cuda")
     def save_output(module, inp, out):
         if module not in cached_outputs:
             cached_outputs[module] = []
@@ -34,7 +35,7 @@ def reconstruct(qmodel, fpmodel, calibration_set, adaround = True, recon_act = F
                 
     with torch.no_grad():
         for data, _ in tqdm(calibration_set):
-            data = data.to('cuda')
+            data = data.to(device)
             fpmodel(data)
 
     # Remove hooks
@@ -100,9 +101,10 @@ def get_input(model, layer, loader, batch_size=32, keep_gpu=True):
 
 def layer_reconstruction(qmodel, layer, fp_module_output, cali_set, iters, adaround = True, loss_type='mse', recon_act = False):
 
+    torch.cuda.set_device(1)
     device = torch.device('cuda')
     print('Start Caching')
-    cached_q_inputs = get_input(qmodel, layer, cali_set, keep_gpu=True).to(device)
+    cached_q_inputs = get_input(qmodel, layer, cali_set, keep_gpu=True)
     print('Done Caching')
     opttarget = []
     lr = 5e-3
