@@ -3,6 +3,10 @@
 
 checkpoints/
 *.txt
+*.tar
+*.tar.gz
+
+data/
 
 ### macOS ###
 # General
